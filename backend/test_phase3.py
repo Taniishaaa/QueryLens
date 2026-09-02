@@ -9,7 +9,7 @@ import requests
 import json
 
 BASE = "http://localhost:8000"
-CONN = "postgresql://postgres:admin@localhost:5432/demo"
+CONN = "postgresql://neondb_owner:npg_8QexLJbkcqp5@ep-falling-flower-a1nsa3qv-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
 
 # ---------------------------------------------------------------------------
 # Helper

@@ -55,14 +55,30 @@ def connect(connection_string: str) -> dict:
             "error": "Invalid connection string format. Expected: postgresql://user:password@host:port/dbname",
         }
 
-    # Close any existing connection first.
-    _close_existing()
-
     try:
         conn = psycopg2.connect(connection_string, connect_timeout=10)
         conn.autocommit = True  # metadata queries don't need transactions
 
+        # Discover all user schemas, then set search_path at session level.
+        # This ensures schema-qualified queries like bookings.flights resolve
+        # correctly for the lifetime of this connection.
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name NOT IN ('pg_catalog','information_schema','pg_toast')
+                  AND schema_name NOT LIKE 'pg_temp%'
+                ORDER BY schema_name;
+            """)
+            schemas = [r[0] for r in cur.fetchall()] or ["public"]
+            # Use SET LOCAL is session-level with autocommit — just SET is fine.
+            search_path = ", ".join(schemas) + ", public"
+            cur.execute("SELECT set_config('search_path', %s, false);", (search_path,))
+
         metadata = _extract_metadata(conn)
+
+        # Only close the old connection AFTER the new one succeeds.
+        _close_existing()
 
         # Persist in session
         _session["connection"] = conn
