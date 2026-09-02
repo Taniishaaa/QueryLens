@@ -3,9 +3,6 @@ main.py
 -------
 FastAPI application entry point.
 
-Phase 1: /connect
-Phase 2: /run
-Phases 3-4 will add /estimate.
 """
 
 from fastapi import FastAPI, HTTPException
@@ -15,6 +12,9 @@ from dotenv import load_dotenv
 import os
 
 import database
+import features as feat
+import ml_models
+import optimizer
 
 load_dotenv()
 
@@ -43,6 +43,10 @@ class ConnectRequest(BaseModel):
 
 
 class RunRequest(BaseModel):
+    query: str
+
+
+class EstimateRequest(BaseModel):
     query: str
 
 
@@ -104,3 +108,59 @@ def run(req: RunRequest):
         raise HTTPException(status_code=400, detail=result["error"])
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# POST /estimate
+# ---------------------------------------------------------------------------
+
+@app.post("/estimate")
+def estimate(req: EstimateRequest):
+    """
+    Run the full query analysis pipeline without executing the query.
+
+    Pipeline:
+      1. Validate query (same safety checks as /run)
+      2. Extract SQL features (no DB needed)
+      3. Extract EXPLAIN features (uses EXPLAIN, not ANALYZE — no execution)
+      4. Predict cost category via ML classifier
+      5. Predict execution time via ML regressor
+      6. Get optimization recommendation
+      7. Return combined response
+    """
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="Query must not be empty.")
+
+    if not database.is_connected():
+        raise HTTPException(status_code=400, detail="No database connected. Call /connect first.")
+
+    query = req.query.strip()
+
+    # Step 1 — safety check (same rules as /run)
+    from database import _check_dangerous_query
+    rejection = _check_dangerous_query(query)
+    if rejection:
+        raise HTTPException(status_code=400, detail=rejection)
+
+    # Step 2+3 — extract all features
+    conn = database.get_connection()
+    all_features = feat.extract_all_features(query, conn)
+
+    # Step 4 — cost category prediction
+    classification = ml_models.predict_cost_category(all_features)
+
+    # Step 5 — execution time prediction
+    predicted_time_ms = ml_models.predict_execution_time(all_features)
+
+    # Step 6 — optimization recommendation
+    recommendation = optimizer.get_optimization_recommendation(query, all_features)
+
+    return {
+        "success": True,
+        "cost_category": classification["category"],
+        "confidence": classification["confidence"],
+        "predicted_execution_time_ms": predicted_time_ms,
+        "estimated_cost": all_features.get("estimated_cost", 0.0),
+        "features": all_features,
+        "recommendation": recommendation,
+    }
