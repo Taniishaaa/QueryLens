@@ -90,6 +90,59 @@ def get_connection() -> Optional[psycopg2.extensions.connection]:
     return None
 
 
+def run_query(query: str, timeout_ms: int = 30000) -> dict:
+    """
+    Validate and execute a read-only SQL query against the connected database.
+
+    - Rejects dangerous statements (DROP, DELETE, TRUNCATE, ALTER, UPDATE, INSERT, etc.)
+    - Enforces a query timeout via PostgreSQL statement_timeout.
+    - Returns columns, rows, and actual execution time in milliseconds.
+    """
+    if not is_connected():
+        return {"success": False, "error": "No database connected. Call /connect first."}
+
+    # Safety check — block destructive SQL before sending to the database.
+    rejection = _check_dangerous_query(query)
+    if rejection:
+        return {"success": False, "error": rejection}
+
+    conn = _session["connection"]
+
+    import time
+
+    try:
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            # Set statement timeout to prevent long-running queries.
+            cur.execute(f"SET statement_timeout = {timeout_ms};")
+
+            start = time.perf_counter()
+            cur.execute(query)
+            elapsed_ms = round((time.perf_counter() - start) * 1000, 3)
+
+            columns = [desc.name for desc in cur.description] if cur.description else []
+            # Convert RealDictRow objects to plain dicts for JSON serialisation.
+            rows = [dict(row) for row in cur.fetchall()]
+
+        return {
+            "success": True,
+            "columns": columns,
+            "rows": rows,
+            "execution_time_ms": elapsed_ms,
+            "row_count": len(rows),
+        }
+
+    except psycopg2.errors.QueryCanceled:
+        return {"success": False, "error": f"Query exceeded timeout of {timeout_ms}ms and was cancelled."}
+    except psycopg2.errors.SyntaxError as e:
+        return {"success": False, "error": f"SQL syntax error: {e.pgerror.strip()}"}
+    except psycopg2.ProgrammingError as e:
+        return {"success": False, "error": f"Query error: {e.pgerror.strip() if e.pgerror else str(e)}"}
+    except psycopg2.Error as e:
+        return {"success": False, "error": f"Database error: {e.pgerror.strip() if e.pgerror else str(e)}"}
+    except Exception:
+        return {"success": False, "error": "Unexpected error while executing query."}
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -114,6 +167,30 @@ def _close_existing():
     _session["connection"] = None
     _session["metadata"] = None
     _session["db_name"] = None
+
+
+def _check_dangerous_query(query: str) -> Optional[str]:
+    """
+    Return an error string if the query contains a forbidden statement,
+    or None if the query looks safe to execute.
+
+    Matches whole keywords at word boundaries to avoid false positives
+    (e.g. a column named 'updated_at' should not be blocked).
+    """
+    forbidden = [
+        "DROP", "DELETE", "TRUNCATE", "ALTER", "UPDATE",
+        "INSERT", "CREATE", "REPLACE", "GRANT", "REVOKE",
+        "COPY", "VACUUM", "REINDEX",
+    ]
+    upper_query = query.upper()
+    for keyword in forbidden:
+        # Match as a whole word so 'UPDATES' or 'DELETES' in column names are safe.
+        if re.search(rf"\b{keyword}\b", upper_query):
+            return (
+                f"Forbidden statement detected: {keyword}. "
+                "Only read-only queries (SELECT) are allowed."
+            )
+    return None
 
 
 def _sanitize_error(msg: str) -> str:

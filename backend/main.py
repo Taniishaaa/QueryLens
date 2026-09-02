@@ -3,15 +3,22 @@ main.py
 -------
 FastAPI application entry point.
 
-Phase 1: /connect endpoint only.
-Phases 2-4 will add /run and /estimate.
+Phase 1: /connect
+Phase 2: /run
+Phases 3-4 will add /estimate.
 """
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from dotenv import load_dotenv
+import os
 
 import database
+
+load_dotenv()
+
+QUERY_TIMEOUT_MS = int(os.getenv("QUERY_TIMEOUT_SECONDS", "30")) * 1000
 
 app = FastAPI(
     title="SQL Query Cost Prediction and Optimization System",
@@ -33,6 +40,10 @@ app.add_middleware(
 
 class ConnectRequest(BaseModel):
     connection_string: str
+
+
+class RunRequest(BaseModel):
+    query: str
 
 
 # ---------------------------------------------------------------------------
@@ -72,3 +83,24 @@ def connect(req: ConnectRequest):
             "tables": result["metadata"]["tables"],
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /run
+# ---------------------------------------------------------------------------
+
+@app.post("/run")
+def run(req: RunRequest):
+    """
+    Execute a read-only SQL query and return columns, rows, and execution time.
+    Does NOT invoke ML models or the optimizer.
+    """
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="Query must not be empty.")
+
+    result = database.run_query(req.query.strip(), timeout_ms=QUERY_TIMEOUT_MS)
+
+    if not result["success"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+
+    return result
