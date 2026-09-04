@@ -153,18 +153,14 @@ def estimate_sql(query: str = Body(..., media_type="text/plain")):
             all_features
         )
 
-        optimization = optimizer.optimize_query(
-            query,
-            conn
-        )
+        
         return {
             "success": True,
             "cost_category": classification["category"],
             "confidence": classification["confidence"],
             "predicted_execution_time_ms": predicted_time_ms,
             "estimated_cost": all_features.get("estimated_cost"),
-            "features": all_features,
-            "optimization": optimization
+            "features": all_features
         }
 
     except Exception as e:
@@ -172,3 +168,41 @@ def estimate_sql(query: str = Body(..., media_type="text/plain")):
             status_code=500,
             detail=str(e)
         )
+
+@app.post("/optimize")
+def optimize_sql(
+    query: str = Body(..., media_type="text/plain")
+):
+    """
+    Optimize a SQL query using the Gemini-based
+    SQL optimizer.
+
+    Accepts multiline SQL directly as raw text.
+    """
+
+    conn = database.get_connection()
+
+    if conn is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Database is not connected."
+        )
+
+    try:
+
+        optimization = optimizer.optimize_query(
+            query,
+            conn
+        )
+
+        return {
+            "success": True,
+            "optimization": optimization
+        }
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )    

@@ -1,17 +1,27 @@
 from google import genai
+
 from config import GEMINI_API_KEY, GEMINI_MODEL
 from schema_reader import get_database_schema
 
+
+# ============================================================
+# GEMINI CLIENT
+# ============================================================
 
 client = genai.Client(
     api_key=GEMINI_API_KEY
 )
 
 
+# ============================================================
+# GENERATE OPTIMIZATION CANDIDATES
+# ============================================================
+
 def generate_candidates(
     original_sql,
     conn,
-    number_of_candidates=3
+    original_plan,
+    number_of_candidates=5
 ):
 
     schema = get_database_schema(conn)
@@ -20,67 +30,212 @@ def generate_candidates(
 You are an expert PostgreSQL query optimizer.
 
 Your task is to generate alternative SQL queries that are
-semantically equivalent to the original query.
+semantically equivalent to the original query while attempting
+to reduce PostgreSQL EXPLAIN estimated execution cost.
 
+============================================================
 DATABASE SCHEMA
-===============
+============================================================
+
 {schema}
 
-ORIGINAL SQL
-============
+============================================================
+ORIGINAL SQL QUERY
+============================================================
+
 {original_sql}
 
-Generate exactly {number_of_candidates} alternative
-PostgreSQL SQL queries.
+============================================================
+ORIGINAL POSTGRESQL QUERY PLAN INFORMATION
+============================================================
 
-OBJECTIVE
-=========
-Find alternative formulations that may have a lower
-PostgreSQL EXPLAIN estimated cost.
+{original_plan}
 
-POSSIBLE SAFE TRANSFORMATIONS
-=============================
+============================================================
+OPTIMIZATION OBJECTIVE
+============================================================
+
+The original query has already been analyzed by PostgreSQL.
+
+Use the available query-plan information together with the
+SQL structure and database schema to identify likely expensive
+operations.
+
+Generate alternative formulations that have a realistic chance
+of producing a lower PostgreSQL EXPLAIN estimated cost.
+
+Do NOT perform cosmetic rewrites simply to make the SQL look
+different.
+
+Prioritize transformations that can actually affect the
+execution plan.
+
+============================================================
+POSSIBLE OPTIMIZATION STRATEGIES
+============================================================
+
+Consider the following when appropriate:
+
+1. Reorganizing JOIN structure.
+
+2. Converting implicit comma joins into explicit JOIN syntax.
+
+3. Removing genuinely redundant join predicates.
+
+4. Rewriting suitable IN / EXISTS conditions.
+
+5. Rewriting suitable EXISTS / IN conditions.
+
+6. Pushing selective predicates earlier when semantically safe.
+
+7. Reducing unnecessary intermediate rows.
+
+8. Simplifying boolean predicates without changing semantics.
+
+9. Eliminating genuinely redundant operations.
+
+10. Restructuring subqueries when this can reduce work.
+
+11. Taking advantage of existing indexes visible in the schema.
+
+12. Reducing unnecessary scans or joins.
+
+13. Restructuring aggregation when it can reduce the number
+    of rows reaching the aggregation stage.
+
+14. Using a different but equivalent relational formulation
+    when it is likely to produce a cheaper execution plan.
+
+Only use a transformation when it is semantically safe.
+
+============================================================
+IMPORTANT OPTIMIZATION PRINCIPLE
+============================================================
+
+Do NOT assume that a rewrite is an optimization merely because
+it is cleaner, shorter, or uses explicit JOIN syntax.
+
+The actual PostgreSQL EXPLAIN estimated cost is the authority.
+
+Every candidate generated here will be independently:
+
+1. SQL validated
+2. EXPLAIN analyzed
+3. compared against the original cost
+4. checked for result equivalence
+
+The final optimizer will only accept a candidate if it is both
+semantically equivalent and lower cost.
+
+============================================================
+SEMANTIC REQUIREMENTS
+============================================================
+
+Every candidate MUST:
+
+- return exactly the same result
+- preserve duplicate behavior
+- preserve NULL behavior
+- preserve filtering semantics
+- preserve JOIN cardinality
+- preserve aggregation semantics
+- preserve selected columns
+- preserve aliases where required
+- use only existing tables
+- use only existing columns
+- use valid PostgreSQL syntax
+
+Never change the requested result simply to reduce cost.
+
+============================================================
+SAFETY REQUIREMENTS
+============================================================
+
+Only SELECT or WITH queries are allowed.
+
+Never generate:
+
+INSERT
+UPDATE
+DELETE
+DROP
+ALTER
+CREATE
+TRUNCATE
+
+Do not modify database data or schema.
+
+============================================================
+CANDIDATE DIVERSITY
+============================================================
+
+Generate exactly {number_of_candidates} candidates.
+
+The candidates should explore DIFFERENT optimization ideas.
+
+Do NOT generate five nearly identical queries with only
+formatting or whitespace differences.
+
+For example, if appropriate, candidates could explore:
+
 - JOIN restructuring
-- converting implicit joins to explicit JOIN syntax
 - predicate restructuring
-- EXISTS / IN transformations where semantically safe
+- EXISTS transformation
 - subquery restructuring
-- filtering earlier where safe
-- removing genuinely redundant operations
-- other semantics-preserving SQL transformations
+- redundant-condition elimination
 
-STRICT RULES
-============
-1. PostgreSQL syntax only.
-2. Preserve exactly the same result.
-3. Do not change selected columns.
-4. Do not change filtering semantics.
-5. Do not invent tables.
-6. Do not invent columns.
-7. Use only tables and columns present in the schema.
-8. Do not modify the database.
-9. Only SELECT or WITH queries.
-10. Never use INSERT, UPDATE, DELETE, DROP, ALTER,
-    CREATE or TRUNCATE.
-11. Do not optimize by changing the requested result.
-12. Generate genuinely different alternatives when possible.
+Use only strategies that are actually applicable to the query.
 
+============================================================
+EXPLANATION REQUIREMENT
+============================================================
+
+For every candidate, provide a SHORT explanation describing
+the intended optimization.
+
+The explanation must answer:
+
+"What was changed and why might this reduce PostgreSQL cost?"
+
+Keep the explanation to 1-2 concise sentences.
+
+Do not claim that the candidate is actually faster.
+
+The candidate will only be considered successful after PostgreSQL
+EXPLAIN and equivalence verification.
+
+============================================================
 OUTPUT FORMAT
-=============
+============================================================
 
-Return ONLY:
+Return ONLY this exact structure:
 
----QUERY---
-<complete SQL query>
-
----QUERY---
-<complete SQL query>
+---CANDIDATE---
 
 ---QUERY---
-<complete SQL query>
+<complete PostgreSQL SQL query>
 
-Do not provide explanations.
+---REASON---
+<1-2 sentence explanation of the intended optimization>
+
+---CANDIDATE---
+
+---QUERY---
+<complete PostgreSQL SQL query>
+
+---REASON---
+<1-2 sentence explanation of the intended optimization>
+
+Continue until exactly {number_of_candidates} candidates
+have been generated.
+
+Do not include any additional commentary.
 """
+
+    print(
+        f"[llm_rewriter] Requesting "
+        f"{number_of_candidates} candidates from Gemini..."
+    )
 
     response = client.interactions.create(
         model=GEMINI_MODEL,
@@ -89,11 +244,19 @@ Do not provide explanations.
 
     text = response.output_text.strip()
 
+    print(
+        "[llm_rewriter] Gemini response received."
+    )
+
     return parse_candidates(
         text,
         number_of_candidates
     )
 
+
+# ============================================================
+# PARSE GEMINI RESPONSE
+# ============================================================
 
 def parse_candidates(
     text,
@@ -102,26 +265,84 @@ def parse_candidates(
 
     candidates = []
 
-    parts = text.split(
-        "---QUERY---"
+    blocks = text.split(
+        "---CANDIDATE---"
     )
 
-    for part in parts:
+    for block in blocks:
 
-        query = part.strip()
+        block = block.strip()
 
-        if not query:
+        if not block:
             continue
+
+        # ----------------------------------------------------
+        # Extract QUERY
+        # ----------------------------------------------------
+
+        if "---QUERY---" not in block:
+            continue
+
+        query_part = block.split(
+            "---QUERY---",
+            1
+        )[1]
+
+        if "---REASON---" in query_part:
+
+            query_text, reason = query_part.split(
+                "---REASON---",
+                1
+            )
+
+        else:
+
+            query_text = query_part
+            reason = (
+                "Gemini did not provide a specific "
+                "optimization explanation."
+            )
+
+        query = query_text.strip()
+        reason = reason.strip()
+
+        # ----------------------------------------------------
+        # Remove markdown code fences
+        # ----------------------------------------------------
 
         query = query.replace(
             "```sql",
+            ""
+        ).replace(
+            "```SQL",
             ""
         ).replace(
             "```",
             ""
         ).strip()
 
-        if query:
-            candidates.append(query)
+        # ----------------------------------------------------
+        # Basic validation
+        # ----------------------------------------------------
+
+        if not query:
+            continue
+
+        if not (
+            query.upper().startswith("SELECT")
+            or
+            query.upper().startswith("WITH")
+        ):
+            continue
+
+        candidates.append({
+            "sql": query,
+            "reason": reason
+        })
+
+    print(
+        f"[llm_rewriter] Parsed "
+        f"{len(candidates)} valid candidates."
+    )
 
     return candidates[:number_of_candidates]
