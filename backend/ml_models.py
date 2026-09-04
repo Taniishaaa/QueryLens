@@ -32,7 +32,10 @@ REGRESSION_MODEL_PATH = os.path.join(
     MODELS_DIR,
     "model_histogram_gradient_boosting.pkl"
 )
-
+CLASSIFICATION_MODEL_PATH = os.path.join(
+    MODELS_DIR,
+    "best_classification_model.pkl"
+)
 
 # ============================================================
 # FEATURE ORDER
@@ -67,7 +70,10 @@ REGRESSION_FEATURES = [
 # ============================================================
 
 _regressor = None
-
+_classifier = None
+_classification_preprocessor = None
+_classification_label_encoder = None
+_classification_feature_columns = None
 
 def _load_regression_model():
 
@@ -111,7 +117,82 @@ def _load_regression_model():
 
 
 _load_regression_model()
+# ============================================================
+# LOAD CLASSIFICATION MODEL
+# ============================================================
 
+def _load_classification_model():
+
+    global _classifier
+    global _classification_preprocessor
+    global _classification_label_encoder
+    global _classification_feature_columns
+
+    if not os.path.exists(CLASSIFICATION_MODEL_PATH):
+
+        print(
+            "[ml_models] Classification model not found:"
+        )
+
+        print(
+            CLASSIFICATION_MODEL_PATH
+        )
+
+        return
+
+    try:
+
+        bundle = joblib.load(
+            CLASSIFICATION_MODEL_PATH
+        )
+
+        # Your PKL is a dictionary containing
+        # model + preprocessor + label encoder.
+        _classifier = bundle["model"]
+
+        _classification_preprocessor = bundle["preprocessor"]
+
+        _classification_label_encoder = bundle["label_encoder"]
+
+        _classification_feature_columns = bundle["feature_columns"]
+
+        print(
+            "[ml_models] Classification model loaded:"
+        )
+
+        print(
+            type(_classifier).__name__
+        )
+
+        print(
+            "[ml_models] Classification features:"
+        )
+
+        print(
+            _classification_feature_columns
+        )
+
+        print(
+            "[ml_models] Classification classes:"
+        )
+
+        print(
+            list(_classification_label_encoder.classes_)
+        )
+
+    except Exception as e:
+
+        print(
+            f"[ml_models] Failed to load classification model: {e}"
+        )
+
+        _classifier = None
+        _classification_preprocessor = None
+        _classification_label_encoder = None
+        _classification_feature_columns = None
+
+
+_load_classification_model()
 
 # ============================================================
 # PUBLIC API
@@ -197,42 +278,110 @@ def predict_execution_time(
 
 
 # ============================================================
-# TEMPORARY CLASSIFICATION PLACEHOLDER
+# CLASSIFICATION
 # ============================================================
 
 def predict_cost_category(
-    features: dict
+    features: dict,
+    query_text: str,
+    source_dataset: str = "JOB"
 ) -> dict:
 
     """
-    Temporary classification implementation.
+    Predict SQL cost category using the trained XGBoost model.
 
-    We will replace this later with your actual
-    classification model.
+    The single PKL file contains:
+        - XGBoost classifier
+        - preprocessing pipeline
+        - label encoder
+        - feature column information
     """
 
-    cost = features.get(
-        "estimated_cost",
-        0.0
+    if _classifier is None:
+
+        raise RuntimeError(
+            "Classification model is not loaded."
+        )
+
+    # --------------------------------------------------------
+    # Build input using the exact training feature columns
+    # --------------------------------------------------------
+
+    classification_input = {}
+
+    for feature in _classification_feature_columns:
+
+        if feature == "query_text":
+
+            classification_input[feature] = query_text
+
+        elif feature == "source_dataset":
+
+            classification_input[feature] = source_dataset
+
+        elif feature in features:
+
+            classification_input[feature] = features[feature]
+
+        else:
+
+            raise ValueError(
+                "Missing classification feature: "
+                + feature
+            )
+
+    X = pd.DataFrame(
+        [classification_input]
     )
 
-    if cost < 100:
+    # --------------------------------------------------------
+    # Apply the SAME preprocessing used during training
+    # --------------------------------------------------------
 
-        return {
-            "category": "Low",
-            "confidence": 0.90
-        }
+    X_processed = _classification_preprocessor.transform(
+        X
+    )
 
-    elif cost < 1000:
+    # --------------------------------------------------------
+    # Predict encoded class
+    # --------------------------------------------------------
 
-        return {
-            "category": "Medium",
-            "confidence": 0.85
-        }
+    predicted_encoded = _classifier.predict(
+        X_processed
+    )[0]
 
-    else:
+    # Convert encoded value back to:
+    # Low / Medium / High
+    predicted_category = (
+        _classification_label_encoder
+        .inverse_transform(
+            [predicted_encoded]
+        )[0]
+    )
 
-        return {
-            "category": "High",
-            "confidence": 0.91
-        }
+    # --------------------------------------------------------
+    # Calculate confidence
+    # --------------------------------------------------------
+
+    probabilities = _classifier.predict_proba(
+        X_processed
+    )[0]
+
+    confidence = float(
+        np.max(probabilities)
+    )
+
+    print(
+        "[ml_models] Classification prediction:",
+        predicted_category
+    )
+
+    print(
+        "[ml_models] Classification confidence:",
+        confidence
+    )
+
+    return {
+        "category": str(predicted_category),
+        "confidence": round(confidence, 4)
+    }

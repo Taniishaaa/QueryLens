@@ -143,17 +143,20 @@ def estimate_sql(query: str = Body(..., media_type="text/plain")):
         print(f"Feature count: {len(all_features)}")
         print("==========================================\n")
 
-        classification = ml_models.predict_cost_category(all_features)
+        classification = ml_models.predict_cost_category(
+            all_features,
+            query_text=query,
+            source_dataset="JOB"
+        )
 
         predicted_time_ms = ml_models.predict_execution_time(
             all_features
         )
 
-        recommendation = optimizer.get_optimization_recommendation(
+        optimization = optimizer.optimize_query(
             query,
-            all_features
+            conn
         )
-
         return {
             "success": True,
             "cost_category": classification["category"],
@@ -161,7 +164,7 @@ def estimate_sql(query: str = Body(..., media_type="text/plain")):
             "predicted_execution_time_ms": predicted_time_ms,
             "estimated_cost": all_features.get("estimated_cost"),
             "features": all_features,
-            "recommendation": recommendation
+            "optimization": optimization
         }
 
     except Exception as e:
