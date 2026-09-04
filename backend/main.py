@@ -5,7 +5,7 @@ FastAPI application entry point.
 
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -114,53 +114,95 @@ def run(req: RunRequest):
 # POST /estimate
 # ---------------------------------------------------------------------------
 
+
 @app.post("/estimate")
-def estimate(req: EstimateRequest):
+def estimate_sql(query: str = Body(..., media_type="text/plain")):
     """
-    Run the full query analysis pipeline without executing the query.
+    Estimate SQL execution time from raw SQL text.
 
-    Pipeline:
-      1. Validate query (same safety checks as /run)
-      2. Extract SQL features (no DB needed)
-      3. Extract EXPLAIN features (uses EXPLAIN, not ANALYZE — no execution)
-      4. Predict cost category via ML classifier
-      5. Predict execution time via ML regressor
-      6. Get optimization recommendation
-      7. Return combined response
+    Accepts multiline SQL directly instead of requiring
+    the SQL to be embedded inside a JSON string.
     """
-    if not req.query or not req.query.strip():
-        raise HTTPException(status_code=400, detail="Query must not be empty.")
 
-    if not database.is_connected():
-        raise HTTPException(status_code=400, detail="No database connected. Call /connect first.")
-
-    query = req.query.strip()
-
-    # Step 1 — safety check (same rules as /run)
-    from database import _check_dangerous_query
-    rejection = _check_dangerous_query(query)
-    if rejection:
-        raise HTTPException(status_code=400, detail=rejection)
-
-    # Step 2+3 — extract all features
     conn = database.get_connection()
-    all_features = feat.extract_all_features(query, conn)
 
-    # Step 4 — cost category prediction
-    classification = ml_models.predict_cost_category(all_features)
+    if conn is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Database is not connected."
+        )
 
-    # Step 5 — execution time prediction
-    predicted_time_ms = ml_models.predict_execution_time(all_features)
+    try:
+        all_features = feat.extract_all_features(query, conn)
 
-    # Step 6 — optimization recommendation
-    recommendation = optimizer.get_optimization_recommendation(query, all_features)
+        print("\n========== REGRESSION FEATURES ==========")
 
-    return {
-        "success": True,
-        "cost_category": classification["category"],
-        "confidence": classification["confidence"],
-        "predicted_execution_time_ms": predicted_time_ms,
-        "estimated_cost": all_features.get("estimated_cost", 0.0),
-        "features": all_features,
-        "recommendation": recommendation,
-    }
+        for name, value in all_features.items():
+            print(f"{name}: {value}")
+
+        print(f"Feature count: {len(all_features)}")
+        print("==========================================\n")
+
+        classification = ml_models.predict_cost_category(
+            all_features,
+            query_text=query,
+            source_dataset="JOB"
+        )
+
+        predicted_time_ms = ml_models.predict_execution_time(
+            all_features
+        )
+
+        
+        return {
+            "success": True,
+            "cost_category": classification["category"],
+            "confidence": classification["confidence"],
+            "predicted_execution_time_ms": predicted_time_ms,
+            "estimated_cost": all_features.get("estimated_cost"),
+            "features": all_features
+        }
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )
+
+@app.post("/optimize")
+def optimize_sql(
+    query: str = Body(..., media_type="text/plain")
+):
+    """
+    Optimize a SQL query using the Gemini-based
+    SQL optimizer.
+
+    Accepts multiline SQL directly as raw text.
+    """
+
+    conn = database.get_connection()
+
+    if conn is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Database is not connected."
+        )
+
+    try:
+
+        optimization = optimizer.optimize_query(
+            query,
+            conn
+        )
+
+        return {
+            "success": True,
+            "optimization": optimization
+        }
+
+    except Exception as e:
+
+        raise HTTPException(
+            status_code=500,
+            detail=str(e)
+        )    

@@ -64,6 +64,7 @@ QUERY_TIMEOUT_SECONDS=30
 ```bash
 cd backend
 uvicorn main:app --reload --port 8000
+python -m uvicorn main:app --reload --port 8000
 ```
 
 Server runs at `http://localhost:8000`
