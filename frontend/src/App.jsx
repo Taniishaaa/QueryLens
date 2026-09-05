@@ -13,7 +13,19 @@ WHERE f.status = 'Scheduled'
 ORDER BY f.scheduled_departure
 LIMIT 50;`;
 
-const tabs = ["Results", "Query plan", "Features", "Optimized SQL"];
+const schema = [
+  { name: "airports", rows: "104", columns: ["airport_code", "airport_name", "city"] },
+  { name: "bookings", rows: "1.1M", columns: ["book_ref", "book_date", "total_amount"] },
+  { name: "flights", rows: "214K", columns: ["flight_id", "flight_no", "status", "route_no"] },
+  { name: "routes", rows: "787", columns: ["route_no", "departure_airport", "arrival_airport"] },
+];
+
+const metrics = [
+  ["Tables", "2", "database"],
+  ["Joins", "1", "merge"],
+  ["Filters", "1", "filter"],
+  ["Plan depth", "2", "layers"],
+];
 
 function Icon({ name, size = 18 }) {
   const paths = {
@@ -28,81 +40,8 @@ function Icon({ name, size = 18 }) {
     filter: <path d="M4 5h16l-6 7v5l-4 2v-7L4 5Z" />,
     merge: <><path d="M7 4v4c0 4 3 4 5 4h5" /><path d="m14 8 3 4-3 4" /><path d="M7 20v-4c0-4 3-4 5-4" /></>,
     settings: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.68 2.68-.06-.06a1.7 1.7 0 0 0-1.88-.34 1.7 1.7 0 0 0-1.03 1.56V21h-3.8v-.22a1.7 1.7 0 0 0-1.03-1.56 1.7 1.7 0 0 0-1.88.34l-.06.06-2.68-2.68.06-.06A1.7 1.7 0 0 0 5.1 15a1.7 1.7 0 0 0-1.56-1.03H3.3v-3.8h.23A1.7 1.7 0 0 0 5.1 9.14a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.68-2.68.06.06a1.7 1.7 0 0 0 1.88.34 1.7 1.7 0 0 0 1.03-1.56V3.15h3.8v.22a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.88-.34l.06-.06 2.68 2.68-.06.06a1.7 1.7 0 0 0-.34 1.88 1.7 1.7 0 0 0 1.56 1.03h.22v3.8h-.22A1.7 1.7 0 0 0 19.4 15Z" /></>,
-    close: <path d="m6 6 12 12M18 6 6 18" />,
-    shield: <><path d="M12 3 5 6v5c0 4.5 3 7.5 7 10 4-2.5 7-5.5 7-10V6l-7-3Z" /><path d="m9 12 2 2 4-4" /></>,
-    refresh: <><path d="M20 11a8 8 0 0 0-14.9-3L3 10" /><path d="M3 4v6h6M4 13a8 8 0 0 0 14.9 3L21 14" /><path d="M21 20v-6h-6" /></>,
   };
-
-  return <svg aria-hidden="true" fill="none" height={size} stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24" width={size}>{paths[name]}</svg>;
-}
-
-function formatCount(value) {
-  if (value === null || value === undefined || value < 0) return "—";
-  return new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(value);
-}
-
-function ConnectionModal({ isOpen, isSubmitting, onClose, onConnect, error }) {
-  const [connectionString, setConnectionString] = useState("");
-
-  if (!isOpen) return null;
-
-  function submit(event) {
-    event.preventDefault();
-    onConnect(connectionString);
-  }
-
-  return <div className="modal-backdrop" role="presentation">
-    <section aria-labelledby="connect-title" aria-modal="true" className="connection-modal" role="dialog">
-      <button aria-label="Close connection dialog" className="modal-close" disabled={isSubmitting} onClick={onClose}><Icon name="close" /></button>
-      <span className="modal-icon"><Icon name="database" size={22} /></span>
-      <p className="eyebrow">PostgreSQL connection</p>
-      <h2 id="connect-title">Connect your database</h2>
-      <p className="modal-copy">QueryLens reads your schema so you can explore tables, run safe queries, and analyze performance.</p>
-      <form onSubmit={submit}>
-        <label htmlFor="connection-string">Connection string</label>
-        <input autoComplete="off" autoFocus disabled={isSubmitting} id="connection-string" onChange={(event) => setConnectionString(event.target.value)} placeholder="postgresql://user:password@host:5432/database" required type="password" value={connectionString} />
-        {error && <p aria-live="polite" className="form-error">{error}</p>}
-        <button className="connect-button" disabled={isSubmitting || !connectionString.trim()} type="submit">{isSubmitting ? "Connecting…" : "Connect database"}</button>
-      </form>
-      <p className="security-note"><Icon name="shield" size={15} /> Your connection string is sent only to the configured QueryLens backend and is not stored by this frontend.</p>
-    </section>
-  </div>;
-}
-
-function SchemaExplorer({ metadata, onConnect }) {
-  const [searchTerm, setSearchTerm] = useState("");
-  const [expandedTable, setExpandedTable] = useState("");
-  const normalizedSearch = searchTerm.trim().toLowerCase();
-  const tables = metadata?.tables ?? [];
-  const schemas = metadata?.schemas ?? [];
-  const matchingTables = tables.filter((table) => {
-    const fields = [table.schema, table.table, ...table.columns.map((column) => column.column_name)];
-    return fields.some((field) => field.toLowerCase().includes(normalizedSearch));
-  });
-
-  return <aside className="schema-panel">
-    <div className="panel-heading"><div><p className="eyebrow">Database</p><h2><Icon name="database" /> {metadata?.database_name || "Not connected"}</h2></div><button aria-label="Connect another database" className="more-button" onClick={onConnect}>•••</button></div>
-    <label className="search"><Icon name="search" size={16} /><input aria-label="Search database schema" disabled={!metadata} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search schema" value={searchTerm} /></label>
-    {!metadata ? <div className="schema-empty"><Icon name="database" size={25} /><strong>Connect a database</strong><p>Tables and columns will appear here after you connect.</p><button onClick={onConnect}>Connect database</button></div> : <div className="schema-list">
-      {schemas.map((schema) => {
-        const schemaTables = matchingTables.filter((table) => table.schema === schema);
-        if (!schemaTables.length) return null;
-        return <section className="schema-group" key={schema}>
-          <div className="schema-label"><Icon name="chevron" size={16} /><span>{schema}</span><em>{schemaTables.length}</em></div>
-          {schemaTables.map((table) => {
-            const tableId = `${table.schema}.${table.table}`;
-            const isExpanded = expandedTable === tableId;
-            return <div className="schema-table" key={tableId}>
-              <button aria-expanded={isExpanded} className={`schema-table-button ${isExpanded ? "selected" : ""}`} onClick={() => setExpandedTable(isExpanded ? "" : tableId)}><Icon name="chevron" size={15} /><Icon name="database" size={15} /><span>{table.table}</span><em>{formatCount(table.estimated_row_count)}</em></button>
-              {isExpanded && <ul>{table.columns.map((column) => <li key={column.column_name}><span className={column.is_nullable === "NO" ? "key-dot" : "column-dot"} /><span>{column.column_name}</span><small>{column.data_type}</small></li>)}</ul>}
-            </div>;
-          })}
-        </section>;
-      })}
-      {!matchingTables.length && <p className="no-match">No tables or columns match “{searchTerm}”.</p>}
-    </div>}
-    {metadata && <div className="schema-footer"><span>{metadata.table_count} tables</span><span>•</span><span>{schemas.length} schemas</span></div>}
-  </aside>;
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
 }
 
 function App() {
