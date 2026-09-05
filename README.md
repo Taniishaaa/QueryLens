@@ -20,6 +20,9 @@ QueryLens/
 │   ├── test_phase2.py     # /connect and /run tests
 │   ├── test_phase3.py     # Feature extraction tests
 │   └── test_phase5.py     # Full end-to-end tests (45 checks)
+├── frontend/               # React + plain CSS workspace UI
+│   ├── src/App.jsx         # Phase 1 application shell
+│   └── src/styles.css      # QueryLens design system and layout
 └── README.md
 ```
 
@@ -69,6 +72,20 @@ python -m uvicorn main:app --reload --port 8000
 
 Server runs at `http://localhost:8000`
 Interactive API docs at `http://localhost:8000/docs`
+
+### 4. Start the frontend (Phase 1)
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite development server proxies `/api/*` requests to the backend at
+`http://localhost:8000`. The current frontend supports the Phase 2 PostgreSQL
+connection flow: it checks backend health, submits connection strings to
+`/connect`, and renders the returned database schema. Query execution,
+estimation, and optimization integration will be added in subsequent phases.
 
 ---
 
