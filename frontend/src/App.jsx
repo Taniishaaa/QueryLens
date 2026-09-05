@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { connectDatabase, getHealth } from "./api";
 
 const sampleQuery = `SELECT
   f.flight_id,
@@ -46,43 +47,68 @@ function Icon({ name, size = 18 }) {
 function App() {
   const [query, setQuery] = useState(sampleQuery);
   const [activeTab, setActiveTab] = useState("Results");
-  const [expandedTable, setExpandedTable] = useState("flights");
+  const [metadata, setMetadata] = useState(null);
+  const [connectionStatus, setConnectionStatus] = useState("checking");
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [connectionError, setConnectionError] = useState("");
+
+  useEffect(() => {
+    let isCurrent = true;
+    getHealth()
+      .then(({ connected }) => {
+        if (!isCurrent) return;
+        setConnectionStatus(connected ? "connected" : "disconnected");
+        setIsModalOpen(!connected);
+      })
+      .catch(() => {
+        if (!isCurrent) return;
+        setConnectionStatus("offline");
+        setIsModalOpen(true);
+        setConnectionError("QueryLens could not reach the backend. Start the API server and try again.");
+      });
+    return () => { isCurrent = false; };
+  }, []);
+
+  async function handleConnect(connectionString) {
+    setIsSubmitting(true);
+    setConnectionError("");
+    try {
+      const result = await connectDatabase(connectionString.trim());
+      setMetadata(result.metadata);
+      setConnectionStatus("connected");
+      setIsModalOpen(false);
+    } catch (error) {
+      setConnectionStatus("disconnected");
+      setConnectionError(error.message);
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  const isConnected = connectionStatus === "connected";
+  const databaseName = metadata?.database_name || (isConnected ? "Active session" : "Not connected");
 
   return <main className="app-shell">
     <header className="topbar">
-      <a className="brand" href="#workspace" aria-label="QueryLens workspace"><span className="brand-mark"><Icon name="spark" size={17} /></span><span>Query<span>Lens</span></span></a>
-      <div className="workspace-crumb"><span>Workspace</span><i /> <strong>Airlines demo</strong></div>
-      <div className="topbar-actions"><span className="connection"><b /> Connected <span>demo</span></span><button className="icon-button" aria-label="Settings"><Icon name="settings" /></button><div className="avatar">RP</div></div>
+      <a className="brand" href="#workspace"><span className="brand-mark"><Icon name="spark" size={17} /></span><span>Query<span>Lens</span></span></a>
+      <div className="workspace-crumb"><span>Workspace</span><i /> <strong>{databaseName}</strong></div>
+      <div className="topbar-actions"><button className={`connection ${connectionStatus}`} onClick={() => setIsModalOpen(true)}><b /> {connectionStatus === "checking" ? "Checking connection" : isConnected ? "Connected" : "Connect database"}<span>{metadata?.database_name || "PostgreSQL"}</span></button><button aria-label="Refresh connection status" className="icon-button" onClick={() => window.location.reload()}><Icon name="refresh" /></button><button aria-label="Settings" className="icon-button"><Icon name="settings" /></button><div aria-label="Current user" className="avatar">QL</div></div>
     </header>
 
     <section className="workspace" id="workspace">
-      <aside className="schema-panel">
-        <div className="panel-heading"><div><p className="eyebrow">Database</p><h2><Icon name="database" /> demo</h2></div><button className="more-button" aria-label="Database options">•••</button></div>
-        <label className="search"><Icon name="search" size={16} /><input placeholder="Search schema" /></label>
-        <div className="schema-label"><Icon name="chevron" size={16} /><span>bookings</span><em>4</em></div>
-        <div className="table-list">{schema.map((table) => <div className="schema-table" key={table.name}>
-          <button className={`schema-table-button ${expandedTable === table.name ? "selected" : ""}`} onClick={() => setExpandedTable(expandedTable === table.name ? "" : table.name)}><Icon name="chevron" size={15} /><Icon name="database" size={15} /><span>{table.name}</span><em>{table.rows}</em></button>
-          {expandedTable === table.name && <ul>{table.columns.map((column, index) => <li key={column}><span className={index === 0 ? "key-dot" : "column-dot"} />{column}</li>)}</ul>}
-        </div>)}</div>
-        <div className="schema-footer"><span>4 tables</span><span>•</span><span>1.3M rows</span></div>
-      </aside>
-
+      <SchemaExplorer metadata={metadata} onConnect={() => { setConnectionError(""); setIsModalOpen(true); }} />
       <section className="query-panel">
-        <div className="query-header"><div><p className="eyebrow">Query editor</p><h1>Flight status overview</h1></div><span className="saved-state">Saved just now</span></div>
-        <div className="editor-card"><div className="editor-toolbar"><div className="file-pill"><Icon name="code" size={16} />query.sql</div><span>PostgreSQL</span></div><textarea aria-label="SQL query editor" spellCheck="false" value={query} onChange={(event) => setQuery(event.target.value)} />
-          <div className="editor-footer"><span><i className="live-dot" /> Ready to analyze</span><span>{query.split("\n").length} lines</span></div></div>
-        <div className="action-row"><button className="button button-run"><Icon name="play" size={16} />Run query</button><button className="button button-estimate"><Icon name="chart" size={17} />Estimate</button><button className="button button-optimize"><Icon name="spark" size={17} />Optimize</button><button className="clear-button" onClick={() => setQuery("")}>Clear</button></div>
-        <section className="results-card"><div className="tabs">{["Results", "Query plan", "Features", "Optimized SQL"].map((tab) => <button key={tab} onClick={() => setActiveTab(tab)} className={activeTab === tab ? "active" : ""}>{tab}</button>)}</div>
-          {activeTab === "Results" ? <div className="results"><div className="result-meta"><span>50 rows returned</span><span>Execution time <strong>4.28 ms</strong></span></div><table><thead><tr><th>flight_id</th><th>flight_no</th><th>status</th><th>departure_airport</th><th>arrival_airport</th></tr></thead><tbody><tr><td>136029</td><td>PG0400</td><td><span className="status-pill">Scheduled</span></td><td>LED</td><td>SVO</td></tr><tr><td>136047</td><td>PG0402</td><td><span className="status-pill">Scheduled</span></td><td>DME</td><td>LED</td></tr></tbody></table></div> : <div className="tab-placeholder"><Icon name={activeTab === "Query plan" ? "layers" : activeTab === "Features" ? "chart" : "spark"} size={24} /><p>{activeTab} will appear after you analyze the query.</p></div>}</section>
+        <div className="query-header"><div><p className="eyebrow">Query editor</p><h1>Flight status overview</h1></div><span className="saved-state">Saved locally</span></div>
+        {!isConnected && <div className="connection-banner"><Icon name="database" size={17} /><span>Connect a database before running or analyzing this query.</span><button onClick={() => setIsModalOpen(true)}>Connect now</button></div>}
+        <div className="editor-card"><div className="editor-toolbar"><div className="file-pill"><Icon name="code" size={16} />query.sql</div><span>PostgreSQL</span></div><textarea aria-label="SQL query editor" spellCheck="false" value={query} onChange={(event) => setQuery(event.target.value)} /><div className="editor-footer"><span><i className="live-dot" /> {isConnected ? "Ready to analyze" : "Waiting for database"}</span><span>{query.split("\n").length} lines</span></div></div>
+        <div className="action-row"><button className="button button-run" disabled={!isConnected}><Icon name="play" size={16} />Run query</button><button className="button button-estimate" disabled={!isConnected}><Icon name="chart" size={17} />Estimate</button><button className="button button-optimize" disabled={!isConnected}><Icon name="spark" size={17} />Optimize</button><button className="clear-button" onClick={() => setQuery("")}>Clear</button></div>
+        <section className="results-card"><div className="tabs">{tabs.map((tab) => <button className={activeTab === tab ? "active" : ""} key={tab} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div><div className="tab-placeholder"><Icon name={activeTab === "Query plan" ? "layers" : activeTab === "Features" ? "chart" : activeTab === "Optimized SQL" ? "spark" : "database"} size={24} /><p>{isConnected ? `${activeTab} will appear after you analyze the query.` : "Connect a database to start exploring query results."}</p></div></section>
       </section>
 
-      <aside className="insights-panel"><div className="insight-heading"><div><p className="eyebrow">Query insights</p><h2>Estimated profile</h2></div><button className="more-button" aria-label="Insight options">•••</button></div>
-        <article className="cost-card"><div className="cost-card-top"><span className="cost-badge">Medium cost</span><span className="trend">↗ 12%</span></div><div className="confidence"><span>Model confidence</span><strong>91%</strong></div><div className="confidence-bar"><i /></div><div className="cost-numbers"><div><strong>245.6<span>ms</span></strong><p>Predicted time</p></div><div><strong>684.2</strong><p>PostgreSQL cost</p></div></div></article>
-        <div className="metric-grid">{metrics.map(([label, value, icon]) => <article className="metric" key={label}><span className="metric-icon"><Icon name={icon} size={16} /></span><strong>{value}</strong><p>{label}</p></article>)}</div>
-        <article className="plan-card"><div className="plan-title"><span className="metric-icon"><Icon name="layers" size={16} /></span><div><h3>Plan signals</h3><p>PostgreSQL EXPLAIN</p></div></div><div className="signal"><span>Sequential scans</span><b className="warning">1</b></div><div className="signal"><span>Index scans</span><b>1</b></div><div className="signal"><span>Estimated rows</span><b>10,842</b></div></article>
-        <article className="tip-card"><span className="tip-icon"><Icon name="spark" size={16} /></span><div><h3>Optimization opportunity</h3><p>An index on <code>flights.status</code> could reduce the sequential scan.</p><button>Explore optimization <span>→</span></button></div></article>
-      </aside>
+      <aside className="insights-panel"><div className="insight-heading"><div><p className="eyebrow">Connection status</p><h2>{isConnected ? "Database ready" : "Awaiting connection"}</h2></div><span className={`state-dot ${connectionStatus}`} /></div><article className="connection-card"><span className="metric-icon"><Icon name="database" size={17} /></span><h3>{databaseName}</h3><p>{isConnected ? metadata ? `${metadata.table_count} tables discovered across ${metadata.schemas.length} schemas.` : "A backend session is connected. Reconnect to load schema metadata in this browser." : connectionStatus === "offline" ? "The backend is unavailable." : "Connect PostgreSQL to unlock query analysis."}</p><button onClick={() => setIsModalOpen(true)}>{isConnected ? "Switch database" : "Connect database"} <span>→</span></button></article><div className="phase-note"><span>Phase 2 complete</span><p>Connection state and schema discovery are live. Query execution and analysis arrive next.</p></div></aside>
     </section>
+    <ConnectionModal error={connectionError} isOpen={isModalOpen} isSubmitting={isSubmitting} onClose={() => { if (!isSubmitting) setIsModalOpen(false); }} onConnect={handleConnect} />
   </main>;
 }
 

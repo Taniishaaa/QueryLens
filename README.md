@@ -82,8 +82,10 @@ npm run dev
 ```
 
 The Vite development server proxies `/api/*` requests to the backend at
-`http://localhost:8000`. The initial phase provides the visual workspace shell;
-interactive API integration will be added in subsequent frontend phases.
+`http://localhost:8000`. The current frontend supports the Phase 2 PostgreSQL
+connection flow: it checks backend health, submits connection strings to
+`/connect`, and renders the returned database schema. Query execution,
+estimation, and optimization integration will be added in subsequent phases.
 
 ---
 
