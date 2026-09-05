@@ -38,3 +38,11 @@ export function estimateQuery(query) {
     body: query,
   });
 }
+
+export function optimizeQuery(query) {
+  return request("/optimize", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: query,
+  });
+}

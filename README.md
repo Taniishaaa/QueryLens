@@ -87,7 +87,9 @@ connection flow: it checks backend health, submits connection strings to
 `/connect`, and renders the returned database schema. It also supports query
 execution through `/run` and ML cost estimation through `/estimate`, including
 result rows, planner signals, model confidence, and the full feature set.
-Query optimization integration will be added in a subsequent phase.
+The final workflow is also available through `/optimize`: QueryLens displays
+the verified candidate, estimated cost comparison, and lets users replace the
+editor content with an improved rewrite.
 
 ---
 

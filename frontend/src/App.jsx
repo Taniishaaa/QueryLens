@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { connectDatabase, estimateQuery, getHealth, runQuery } from "./api";
+import { connectDatabase, estimateQuery, getHealth, optimizeQuery, runQuery } from "./api";
 
 const sampleQuery = `SELECT
   f.flight_id,
@@ -111,7 +111,7 @@ function formatValue(value) {
   return String(value);
 }
 
-function ResultsPanel({ activeTab, estimate, result }) {
+function ResultsPanel({ activeTab, estimate, onReplaceQuery, optimization, result }) {
   if (activeTab === "Results" && result) {
     return <div className="results-content">
       <div className="result-meta"><span>{result.row_count} rows returned</span><span>Execution time <strong>{result.execution_time_ms} ms</strong></span></div>
@@ -128,8 +128,19 @@ function ResultsPanel({ activeTab, estimate, result }) {
     return <div className="feature-grid">{Object.entries(estimate.features).map(([name, value]) => <div className="feature-row" key={name}><span>{name.replaceAll("_", " ")}</span><strong>{formatValue(value)}</strong></div>)}</div>;
   }
 
+  if (activeTab === "Optimized SQL" && optimization) {
+    const improved = optimization.status === "IMPROVED";
+    return <div className="optimization-result">
+      <div className={`optimization-status ${improved ? "improved" : "unchanged"}`}><span>{improved ? "✓" : "—"}</span><div><strong>{improved ? "Verified equivalent" : "No verified improvement"}</strong><p>{improved ? `${formatValue(optimization.improvement_percent)}% estimated cost reduction` : "The original query remains the best verified option."}</p></div></div>
+      <p className="optimization-explanation">{optimization.optimization_explanation}</p>
+      <div className="cost-comparison"><div><span>Original cost</span><strong>{formatValue(optimization.original_cost)}</strong></div><div><span>Optimized cost</span><strong>{formatValue(optimization.optimized_cost)}</strong></div></div>
+      <div className="sql-comparison"><div><span>Original SQL</span><pre>{optimization.original_sql}</pre></div><div><span>Optimized SQL</span><pre>{optimization.optimized_sql}</pre></div></div>
+      {improved && <div className="optimization-actions"><button onClick={() => navigator.clipboard?.writeText(optimization.optimized_sql)}>Copy optimized SQL</button><button className="replace-query" onClick={() => onReplaceQuery(optimization.optimized_sql)}>Replace editor query</button></div>}
+    </div>;
+  }
+
   const icon = activeTab === "Query plan" ? "layers" : activeTab === "Features" ? "chart" : activeTab === "Optimized SQL" ? "spark" : "database";
-  const message = activeTab === "Results" ? "Run a read-only query to see its result set here." : activeTab === "Optimized SQL" ? "Query optimization will be available in Phase 5." : "Estimate this query to populate this analysis.";
+  const message = activeTab === "Results" ? "Run a read-only query to see its result set here." : activeTab === "Optimized SQL" ? "Optimize this query to generate and verify a lower-cost rewrite." : "Estimate this query to populate this analysis.";
   return <div className="tab-placeholder"><Icon name={icon} size={24} /><p>{message}</p></div>;
 }
 
@@ -159,6 +170,7 @@ function App() {
   const [connectionError, setConnectionError] = useState("");
   const [result, setResult] = useState(null);
   const [estimate, setEstimate] = useState(null);
+  const [optimization, setOptimization] = useState(null);
   const [queryError, setQueryError] = useState("");
   const [activeRequest, setActiveRequest] = useState("");
 
@@ -235,6 +247,30 @@ function App() {
     }
   }
 
+  async function handleOptimize() {
+    if (!query.trim()) {
+      setQueryError("Enter a SQL query before optimizing it.");
+      return;
+    }
+    setActiveRequest("optimize");
+    setQueryError("");
+    try {
+      const response = await optimizeQuery(query.trim());
+      setOptimization(response.optimization);
+      setActiveTab("Optimized SQL");
+    } catch (error) {
+      setQueryError(error.message);
+      setActiveTab("Optimized SQL");
+    } finally {
+      setActiveRequest("");
+    }
+  }
+
+  function updateQuery(nextQuery) {
+    setQuery(nextQuery);
+    setOptimization(null);
+  }
+
   return <main className="app-shell">
     <header className="topbar">
       <a className="brand" href="#workspace"><span className="brand-mark"><Icon name="spark" size={17} /></span><span>Query<span>Lens</span></span></a>
@@ -247,10 +283,10 @@ function App() {
       <section className="query-panel">
         <div className="query-header"><div><p className="eyebrow">Query editor</p><h1>Flight status overview</h1></div><span className="saved-state">Saved locally</span></div>
         {!isConnected && <div className="connection-banner"><Icon name="database" size={17} /><span>Connect a database before running or analyzing this query.</span><button onClick={() => setIsModalOpen(true)}>Connect now</button></div>}
-        <div className="editor-card"><div className="editor-toolbar"><div className="file-pill"><Icon name="code" size={16} />query.sql</div><span>PostgreSQL</span></div><textarea aria-label="SQL query editor" spellCheck="false" value={query} onChange={(event) => setQuery(event.target.value)} /><div className="editor-footer"><span><i className="live-dot" /> {isConnected ? "Ready to analyze" : "Waiting for database"}</span><span>{query.split("\n").length} lines</span></div></div>
-        <div className="action-row"><button className="button button-run" disabled={!isConnected || Boolean(activeRequest)} onClick={handleRun}><Icon name="play" size={16} />{activeRequest === "run" ? "Running…" : "Run query"}</button><button className="button button-estimate" disabled={!isConnected || Boolean(activeRequest)} onClick={handleEstimate}><Icon name="chart" size={17} />{activeRequest === "estimate" ? "Estimating…" : "Estimate"}</button><button className="button button-optimize" disabled title="Optimization arrives in Phase 5"><Icon name="spark" size={17} />Optimize</button><button className="clear-button" onClick={() => { setQuery(""); setQueryError(""); }}>Clear</button></div>
+        <div className="editor-card"><div className="editor-toolbar"><div className="file-pill"><Icon name="code" size={16} />query.sql</div><span>PostgreSQL</span></div><textarea aria-label="SQL query editor" spellCheck="false" value={query} onChange={(event) => updateQuery(event.target.value)} /><div className="editor-footer"><span><i className="live-dot" /> {isConnected ? "Ready to analyze" : "Waiting for database"}</span><span>{query.split("\n").length} lines</span></div></div>
+        <div className="action-row"><button className="button button-run" disabled={!isConnected || Boolean(activeRequest)} onClick={handleRun}><Icon name="play" size={16} />{activeRequest === "run" ? "Running…" : "Run query"}</button><button className="button button-estimate" disabled={!isConnected || Boolean(activeRequest)} onClick={handleEstimate}><Icon name="chart" size={17} />{activeRequest === "estimate" ? "Estimating…" : "Estimate"}</button><button className="button button-optimize" disabled={!isConnected || Boolean(activeRequest)} onClick={handleOptimize}><Icon name="spark" size={17} />{activeRequest === "optimize" ? "Optimizing…" : "Optimize"}</button><button className="clear-button" onClick={() => { updateQuery(""); setQueryError(""); }}>Clear</button></div>
         {queryError && <div aria-live="polite" className="query-error">{queryError}</div>}
-        <section className="results-card"><div className="tabs">{tabs.map((tab) => <button className={activeTab === tab ? "active" : ""} key={tab} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div><ResultsPanel activeTab={activeTab} estimate={estimate} result={result} /></section>
+        <section className="results-card"><div className="tabs">{tabs.map((tab) => <button className={activeTab === tab ? "active" : ""} key={tab} onClick={() => setActiveTab(tab)}>{tab}</button>)}</div><ResultsPanel activeTab={activeTab} estimate={estimate} onReplaceQuery={updateQuery} optimization={optimization} result={result} /></section>
       </section>
 
       <InsightsPanel estimate={estimate} isConnected={isConnected} onConnect={() => setIsModalOpen(true)} />
