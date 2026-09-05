@@ -84,8 +84,10 @@ npm run dev
 The Vite development server proxies `/api/*` requests to the backend at
 `http://localhost:8000`. The current frontend supports the Phase 2 PostgreSQL
 connection flow: it checks backend health, submits connection strings to
-`/connect`, and renders the returned database schema. Query execution,
-estimation, and optimization integration will be added in subsequent phases.
+`/connect`, and renders the returned database schema. It also supports query
+execution through `/run` and ML cost estimation through `/estimate`, including
+result rows, planner signals, model confidence, and the full feature set.
+Query optimization integration will be added in a subsequent phase.
 
 ---
 

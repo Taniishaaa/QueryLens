@@ -22,3 +22,19 @@ export function connectDatabase(connectionString) {
     body: JSON.stringify({ connection_string: connectionString }),
   });
 }
+
+export function runQuery(query) {
+  return request("/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+}
+
+export function estimateQuery(query) {
+  return request("/estimate", {
+    method: "POST",
+    headers: { "Content-Type": "text/plain" },
+    body: query,
+  });
+}
