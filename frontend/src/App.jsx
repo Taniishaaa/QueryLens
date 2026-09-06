@@ -1,17 +1,7 @@
 import { useEffect, useState } from "react";
 import { connectDatabase, estimateQuery, getHealth, optimizeQuery, runQuery } from "./api";
 
-const sampleQuery = `SELECT
-  f.flight_id,
-  f.flight_no,
-  f.status,
-  r.departure_airport,
-  r.arrival_airport
-FROM bookings.flights AS f
-JOIN bookings.routes AS r ON f.route_no = r.route_no
-WHERE f.status = 'Scheduled'
-ORDER BY f.scheduled_departure
-LIMIT 50;`;
+const sampleQuery = ``;
 
 const tabs = ["Results", "Query plan", "Features", "Optimized SQL"];
 
@@ -275,7 +265,9 @@ function App() {
     <header className="topbar">
       <a className="brand" href="#workspace"><span className="brand-mark"><Icon name="spark" size={17} /></span><span>Query<span>Lens</span></span></a>
       <div className="workspace-crumb"><span>Workspace</span><i /> <strong>{databaseName}</strong></div>
-      <div className="topbar-actions"><button className={`connection ${connectionStatus}`} onClick={() => setIsModalOpen(true)}><b /> {connectionStatus === "checking" ? "Checking connection" : isConnected ? "Connected" : "Connect database"}<span>{metadata?.database_name || "PostgreSQL"}</span></button><button aria-label="Refresh connection status" className="icon-button" onClick={() => window.location.reload()}><Icon name="refresh" /></button><button aria-label="Settings" className="icon-button"><Icon name="settings" /></button><div aria-label="Current user" className="avatar">QL</div></div>
+      <div className="topbar-actions"><button className={`connection ${connectionStatus}`} onClick={() => setIsModalOpen(true)}><b /> {connectionStatus === "checking" ? "Checking connection" : isConnected ? "Connected" : "Connect database"}<span>{metadata?.database_name || "PostgreSQL"}</span></button>
+      <button aria-label="Refresh connection status" className="icon-button" onClick={() => window.location.reload()}><Icon name="refresh" /></button>
+      </div>
     </header>
 
     <section className="workspace" id="workspace">

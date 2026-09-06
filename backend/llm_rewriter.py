@@ -237,12 +237,12 @@ Do not include any additional commentary.
         f"{number_of_candidates} candidates from Gemini..."
     )
 
-    response = client.interactions.create(
+    response = client.models.generate_content(
         model=GEMINI_MODEL,
-        input=prompt
+        contents=prompt
     )
 
-    text = response.output_text.strip()
+    text = response.text.strip()
 
     print(
         "[llm_rewriter] Gemini response received."
